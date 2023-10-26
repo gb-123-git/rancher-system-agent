@@ -875,7 +875,7 @@ generate_cattle_identifier() {
 # ^@ Changes Made to Fn for Alpine Compatibility
 ensure_systemd_service_stopped() {
     if [ "$LINUX_VER" = "Alpine Linux" ]; then
-        if [ "$(rc-service rancher-system-agent status &> /dev/null)" == "* status: started" || "$(rc-service rancher-system-agent status &> /dev/null)" == "* status: starting" ]; then
+        if [[ "$(rc-service rancher-system-agent status &> /dev/null)" == "* status: started" || "$(rc-service rancher-system-agent status &> /dev/null)" == "* status: starting" ]]; then
             info "Rancher System Agent was detected on this host. Ensuring the rancher-system-agent is stopped."
             rc-service rancher-system-agent stop
         fi
