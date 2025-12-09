@@ -586,38 +586,63 @@ verify_downloader() {
 create_systemd_service_file() {
     
 if [ "$LINUX_VER" = "Alpine Linux" ]; then
-    info "Open-RC: Creating service file"
-    cat <<-EOF > "/etc/init.d/rancher-system-agent"
+    info "openrc: Creating service file"
+
+    UMASK=$(umask)
+    umask 022
+
+    cat <<-'EOF' >/etc/init.d/rancher-system-agent
 #!/sbin/openrc-run
+
+name="Rancher System Agent"
 description="Rancher System Agent"
-pidfile="/run/\${RC_SVCNAME}.pid"
-command_background=true
+
+ENV_FILES="
+/etc/conf.d/rancher-system-agent
+/etc/default/rancher-system-agent
+/etc/sysconfig/rancher-system-agent
+${CATTLE_AGENT_CONFIG_DIR}/rancher-system-agent.env
+"
+
+for f in $ENV_FILES; do
+    [ -r "$f" ] && . "$f"
+done
+
+: "${CATTLE_AGENT_BIN_PREFIX:=/usr/local}"
+: "${CATTLE_AGENT_LOGLEVEL:=info}"
+: "${CATTLE_AGENT_CONFIG_DIR:=/etc/rancher-system-agent}"
+: "${CATTLE_AGENT_STRICT_VERIFY:=true}"
+
+command="${CATTLE_AGENT_BIN_PREFIX}/bin/rancher-system-agent"
+command_args="sentinel"
+command_background="yes"
 #command_args="-p \${pidfile}"
 #command_user="root:root"
-output_log="$ALPINE_LOG_DIR/rancher_svc_op.log"
-error_log="$ALPINE_LOG_DIR/rancher_svc_err.log"
-start_pre()
-    {
-    if [[ -f /etc/default/rancher-system-agent ]]; then
-    export \$(grep -v '^#' /etc/default/rancher-system-agent)
-    fi
-    if [[ -f /etc/sysconfig/rancher-system-agent ]]; then
-    export \$(grep -v '^#' /etc/sysconfig/rancher-system-agent)
-    fi
-    if [[ -f  ${CATTLE_AGENT_CONFIG_DIR}/rancher-system-agent.env ]] && [[ \$(du -b  ${CATTLE_AGENT_CONFIG_DIR}/rancher-system-agent.env | awk '{print \$1}') -gt 0 ]]; then
-    export \$(grep -v '^#'  ${CATTLE_AGENT_CONFIG_DIR}/rancher-system-agent.env)
-    fi
-    export CATTLE_LOGLEVEL=${CATTLE_AGENT_LOGLEVEL}
-    export CATTLE_AGENT_CONFIG=${CATTLE_AGENT_CONFIG_DIR}/config.yaml
-    }
-command=".${CATTLE_AGENT_BIN_PREFIX}/bin/rancher-system-agent sentinel"
-depend()
-    {
-        want net
-        after net
-    }
+
+pidfile="/run/${RC_SVCNAME}.pid"
+
+#output_log="$ALPINE_LOG_DIR/rancher_svc_op.log"
+#error_log="$ALPINE_LOG_DIR/rancher_svc_err.log"
+
+depend() {
+    need net
+    after bootmisc
+}
+
+start_pre() {
+    umask 022
+    export CATTLE_LOGLEVEL="${CATTLE_AGENT_LOGLEVEL}"
+    export CATTLE_AGENT_CONFIG="${CATTLE_AGENT_CONFIG_DIR}/config.yaml"
+    export CATTLE_AGENT_STRICT_VERIFY="${CATTLE_AGENT_STRICT_VERIFY}"
+}
+
+supervisor="supervise-daemon"
+supervise_daemon_args="--respawn --respawn-delay 5"
 EOF
-    chmod +x /etc/init.d/rancher-system-agent
+
+chmod 0755 /etc/init.d/rancher-system-agent
+umask "$UMASK"
+    
 else
     info "systemd: Creating service file"
 
@@ -932,7 +957,6 @@ create_env_file() {
         FILE_SA_ENV="/etc/systemd/system/rancher-system-agent.env"
     fi
     
-    FILE_SA_ENV="/etc/systemd/system/rancher-system-agent.env"
     info "Creating environment file ${FILE_SA_ENV}"
     install -m 0600 /dev/null "${FILE_SA_ENV}"
     for i in "HTTP_PROXY" "HTTPS_PROXY" "NO_PROXY"; do
@@ -959,6 +983,14 @@ create_env_file() {
         info "Removing blank ENV file detected at ${FILE_SA_ENV}"
         rm -f ${FILE_SA_ENV}
     fi
+}
+
+# ^@ Changes Made to Fn for Alpine Compatibility
+detect_os() {
+    LINUX_VER=$(head -1 /etc/os-release | cut -d'=' -f2 | awk '{print substr($0, 2, length($0) - 2)}')
+    #Alternate Function
+    #LINUX_VER=$(head -1 /etc/os-release | cut -d'=' -f2 | tr -d '"')
+    info "Detected OS Name - $LINUX_VER"
 }
 
 ensure_applyinator_not_active() {
@@ -1011,7 +1043,6 @@ do_install() {
     create_systemd_service_file
     create_env_file
 
-    	
      # ^@ Changes Made to Fn for Alpine Compatibility
     if [ "$LINUX_VER" = "Alpine Linux" ]; then
         info "Enabling rancher-system-agent service for Open-RC"
